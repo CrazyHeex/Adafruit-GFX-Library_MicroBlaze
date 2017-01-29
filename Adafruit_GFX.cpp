@@ -31,11 +31,10 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 */
 
-#ifdef __AVR__
- #include <avr/pgmspace.h>
-#elif defined(ESP8266)
- #include <pgmspace.h>
-#endif
+#include <limits.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "Adafruit_GFX.h"
 #include "glcdfont.c"
 
@@ -466,11 +465,7 @@ void Adafruit_GFX::drawXBitmap(int16_t x, int16_t y,
   }
 }
 
-#if ARDUINO >= 100
 size_t Adafruit_GFX::write(uint8_t c) {
-#else
-void Adafruit_GFX::write(uint8_t c) {
-#endif
 
   if(!gfxFont) { // 'Classic' built-in font
 
@@ -516,9 +511,7 @@ void Adafruit_GFX::write(uint8_t c) {
     }
 
   }
-#if ARDUINO >= 100
   return 1;
-#endif
 }
 
 // Draw a character
@@ -639,7 +632,7 @@ void Adafruit_GFX::setTextColor(uint16_t c, uint16_t b) {
   textbgcolor = b;
 }
 
-void Adafruit_GFX::setTextWrap(boolean w) {
+void Adafruit_GFX::setTextWrap(bool w) {
   wrap = w;
 }
 
@@ -670,7 +663,7 @@ void Adafruit_GFX::setRotation(uint8_t x) {
 // with the erroneous character indices.  By default, the library uses the
 // original 'wrong' behavior and old sketches will still work.  Pass 'true'
 // to this function to use correct CP437 character values in your code.
-void Adafruit_GFX::cp437(boolean x) {
+void Adafruit_GFX::cp437(bool x) {
   _cp437 = x;
 }
 
@@ -779,96 +772,6 @@ void Adafruit_GFX::getTextBounds(char *str, int16_t x, int16_t y,
   } // End classic vs custom font
 }
 
-// Same as above, but for PROGMEM strings
-void Adafruit_GFX::getTextBounds(const __FlashStringHelper *str,
- int16_t x, int16_t y, int16_t *x1, int16_t *y1, uint16_t *w, uint16_t *h) {
-  uint8_t *s = (uint8_t *)str, c;
-
-  *x1 = x;
-  *y1 = y;
-  *w  = *h = 0;
-
-  if(gfxFont) {
-
-    GFXglyph *glyph;
-    uint8_t   first = pgm_read_byte(&gfxFont->first),
-              last  = pgm_read_byte(&gfxFont->last),
-              gw, gh, xa;
-    int8_t    xo, yo;
-    int16_t   minx = _width, miny = _height, maxx = -1, maxy = -1,
-              gx1, gy1, gx2, gy2, ts = (int16_t)textsize,
-              ya = ts * (uint8_t)pgm_read_byte(&gfxFont->yAdvance);
-
-    while((c = pgm_read_byte(s++))) {
-      if(c != '\n') { // Not a newline
-        if(c != '\r') { // Not a carriage return, is normal char
-          if((c >= first) && (c <= last)) { // Char present in current font
-            c    -= first;
-            glyph = &(((GFXglyph *)pgm_read_pointer(&gfxFont->glyph))[c]);
-            gw    = pgm_read_byte(&glyph->width);
-            gh    = pgm_read_byte(&glyph->height);
-            xa    = pgm_read_byte(&glyph->xAdvance);
-            xo    = pgm_read_byte(&glyph->xOffset);
-            yo    = pgm_read_byte(&glyph->yOffset);
-            if(wrap && ((x + (((int16_t)xo + gw) * ts)) >= _width)) {
-              // Line wrap
-              x  = 0;  // Reset x to 0
-              y += ya; // Advance y by 1 line
-            }
-            gx1 = x   + xo * ts;
-            gy1 = y   + yo * ts;
-            gx2 = gx1 + gw * ts - 1;
-            gy2 = gy1 + gh * ts - 1;
-            if(gx1 < minx) minx = gx1;
-            if(gy1 < miny) miny = gy1;
-            if(gx2 > maxx) maxx = gx2;
-            if(gy2 > maxy) maxy = gy2;
-            x += xa * ts;
-          }
-        } // Carriage return = do nothing
-      } else { // Newline
-        x  = 0;  // Reset x
-        y += ya; // Advance y by 1 line
-      }
-    }
-    // End of string
-    *x1 = minx;
-    *y1 = miny;
-    if(maxx >= minx) *w  = maxx - minx + 1;
-    if(maxy >= miny) *h  = maxy - miny + 1;
-
-  } else { // Default font
-
-    uint16_t lineWidth = 0, maxWidth = 0; // Width of current, all lines
-
-    while((c = pgm_read_byte(s++))) {
-      if(c != '\n') { // Not a newline
-        if(c != '\r') { // Not a carriage return, is normal char
-          if(wrap && ((x + textsize * 6) >= _width)) {
-            x  = 0;            // Reset x to 0
-            y += textsize * 8; // Advance y by 1 line
-            if(lineWidth > maxWidth) maxWidth = lineWidth; // Save widest line
-            lineWidth  = textsize * 6; // First char on new line
-          } else { // No line wrap, just keep incrementing X
-            lineWidth += textsize * 6; // Includes interchar x gap
-          }
-        } // Carriage return = do nothing
-      } else { // Newline
-        x  = 0;            // Reset x to 0
-        y += textsize * 8; // Advance y by 1 line
-        if(lineWidth > maxWidth) maxWidth = lineWidth; // Save widest line
-        lineWidth = 0;     // Reset lineWidth for new line
-      }
-    }
-    // End of string
-    if(lineWidth) y += textsize * 8; // Add height of last (or only) line
-    if(lineWidth > maxWidth) maxWidth = lineWidth; // Is the last or only line the widest?
-    *w = maxWidth - 1;               // Don't include last interchar x gap
-    *h = y - *y1;
-
-  } // End classic vs custom font
-}
-
 // Return the size of the display (per current rotation)
 int16_t Adafruit_GFX::width(void) const {
   return _width;
@@ -878,7 +781,7 @@ int16_t Adafruit_GFX::height(void) const {
   return _height;
 }
 
-void Adafruit_GFX::invertDisplay(boolean i) {
+void Adafruit_GFX::invertDisplay(bool i) {
   // Do nothing, must be subclassed if supported by hardware
 }
 
@@ -907,7 +810,7 @@ void Adafruit_GFX_Button::initButton(
   _label[9] = 0;
 }
 
-void Adafruit_GFX_Button::drawButton(boolean inverted) {
+void Adafruit_GFX_Button::drawButton(bool inverted) {
   uint16_t fill, outline, text;
 
   if(!inverted) {
@@ -929,20 +832,20 @@ void Adafruit_GFX_Button::drawButton(boolean inverted) {
   _gfx->print(_label);
 }
 
-boolean Adafruit_GFX_Button::contains(int16_t x, int16_t y) {
+bool Adafruit_GFX_Button::contains(int16_t x, int16_t y) {
   if ((x < (_x - _w/2)) || (x > (_x + _w/2))) return false;
   if ((y < (_y - _h/2)) || (y > (_y + _h/2))) return false;
   return true;
 }
 
-void Adafruit_GFX_Button::press(boolean p) {
+void Adafruit_GFX_Button::press(bool p) {
   laststate = currstate;
   currstate = p;
 }
 
-boolean Adafruit_GFX_Button::isPressed() { return currstate; }
-boolean Adafruit_GFX_Button::justPressed() { return (currstate && !laststate); }
-boolean Adafruit_GFX_Button::justReleased() { return (!currstate && laststate); }
+bool Adafruit_GFX_Button::isPressed() { return currstate; }
+bool Adafruit_GFX_Button::justPressed() { return (currstate && !laststate); }
+bool Adafruit_GFX_Button::justReleased() { return (!currstate && laststate); }
 
 // -------------------------------------------------------------------------
 
